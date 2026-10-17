@@ -88,7 +88,7 @@ async def test_cryptopay_create_invoice_request_and_parse(
         user_id=1,
         product=product,
         provider="cryptopay",
-        amount_minor=499,
+        unit_amount_minor=499,
         currency="USD",
         expiry_minutes=30,
     )
@@ -121,7 +121,7 @@ async def test_cryptopay_api_error_becomes_provider_error(
         user_id=1,
         product=product,
         provider="cryptopay",
-        amount_minor=499,
+        unit_amount_minor=499,
         currency="USD",
         expiry_minutes=30,
     )
@@ -155,7 +155,7 @@ async def test_cryptopay_check_status_maps_paid_invoice(
         user_id=1,
         product=product,
         provider="cryptopay",
-        amount_minor=499,
+        unit_amount_minor=499,
         currency="USD",
         expiry_minutes=30,
     )
@@ -193,7 +193,7 @@ async def test_oxapay_create_invoice_request_and_parse(
         user_id=1,
         product=product,
         provider="oxapay",
-        amount_minor=499,
+        unit_amount_minor=499,
         currency="USD",
         expiry_minutes=30,
     )
@@ -224,7 +224,7 @@ async def test_oxapay_non_200_status_becomes_provider_error(
         user_id=1,
         product=product,
         provider="oxapay",
-        amount_minor=499,
+        unit_amount_minor=499,
         currency="USD",
         expiry_minutes=30,
     )
@@ -246,7 +246,7 @@ async def test_oxapay_check_status_maps_paid_payment(
         user_id=1,
         product=product,
         provider="oxapay",
-        amount_minor=499,
+        unit_amount_minor=499,
         currency="USD",
         expiry_minutes=30,
     )
@@ -269,7 +269,7 @@ async def test_oxapay_transport_failure_is_retryable(
         user_id=1,
         product=product,
         provider="oxapay",
-        amount_minor=499,
+        unit_amount_minor=499,
         currency="USD",
         expiry_minutes=30,
     )

@@ -47,14 +47,16 @@ async def _make_order(
     currency: str = "USD",
     amount_minor: int = 499,
     provider: str = "oxapay",
+    quantity: int = 1,
 ) -> Order:
     order = await create_order(
         session,
         user_id=USER_ID,
         product=product,
         provider=provider,
-        amount_minor=amount_minor,
+        unit_amount_minor=amount_minor,
         currency=currency,
+        quantity=quantity,
         expiry_minutes=30,
     )
     order.provider_invoice_id = "inv-1"

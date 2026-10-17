@@ -12,6 +12,7 @@ from app.bot.middlewares import DbSessionMiddleware
 from app.bot.routers import admin, orders, payments, shop
 from app.config import Settings
 from app.providers.registry import ProviderRegistry
+from app.services.stock_watcher import WatcherRegistry
 
 
 def create_bot(settings: Settings) -> Bot:
@@ -26,6 +27,7 @@ def create_dispatcher(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     registry: ProviderRegistry,
+    stock_watchers: WatcherRegistry | None = None,
 ) -> Dispatcher:
     dispatcher = Dispatcher(storage=MemoryStorage())
 
@@ -35,8 +37,14 @@ def create_dispatcher(
     dispatcher.callback_query.middleware(session_middleware)
     dispatcher.pre_checkout_query.middleware(session_middleware)
 
-    # Inject the config and provider registry into every handler.
-    dispatcher.workflow_data.update({"settings": settings, "providers": registry})
+    # Inject the config, provider registry and stock watcher registry.
+    dispatcher.workflow_data.update(
+        {
+            "settings": settings,
+            "providers": registry,
+            "stock_watchers": stock_watchers or WatcherRegistry(),
+        }
+    )
 
     # Admin router first so its commands are matched before generic handlers.
     dispatcher.include_router(admin.build_router())

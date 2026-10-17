@@ -48,6 +48,7 @@ async def start_checkout(
     user_id: int,
     product: Product,
     provider_name: str,
+    quantity: int = 1,
 ) -> Order:
     """Create the order row, then the provider invoice.
 
@@ -58,14 +59,29 @@ async def start_checkout(
     if provider is None:
         raise CheckoutError(f"Payment method '{provider_name}' is not available.")
 
-    amount_minor, currency = price_for(product, provider_name)
+    quantity = int(quantity)
+    if quantity < 1:
+        raise CheckoutError("Quantity must be at least 1.")
+    if quantity > max(1, product.max_per_order):
+        raise CheckoutError(
+            f"You can order at most {product.max_per_order} of this item at a time."
+        )
+
+    in_stock = await catalog.stock_count(session, product.id)
+    if in_stock < quantity:
+        raise CheckoutError(
+            f"Only {in_stock} left in stock, so {quantity} cannot be ordered right now."
+        )
+
+    unit_amount_minor, currency = price_for(product, provider_name)
     order = await create_order(
         session,
         user_id=user_id,
         product=product,
         provider=provider_name,
-        amount_minor=amount_minor,
+        unit_amount_minor=unit_amount_minor,
         currency=currency,
+        quantity=quantity,
         expiry_minutes=settings.order_expiry_minutes,
     )
 

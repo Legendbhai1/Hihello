@@ -23,28 +23,71 @@ PROVIDER_LABELS = {
     "oxapay": "OxaPay",
 }
 
+STOCK_DOT = {0: "🔴", 1: "🟡"}
+
+
+def escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def usd(cents: int) -> str:
+    return f"${(Decimal(cents) / 100).quantize(Decimal('0.01'))}"
+
+
+def stock_badge(stock: int) -> str:
+    """A quick at-a-glance stock indicator: plentiful, low, or out."""
+    if stock <= 0:
+        return "🔴 Out of stock"
+    if stock <= 3:
+        return f"🟡 Low stock: {stock}"
+    return f"🟢 In stock: {stock}"
+
 
 def price_line(product: Product, providers: list[str]) -> str:
     parts: list[str] = []
     if "stars" in providers and product.price_stars > 0:
         parts.append(f"⭐ {product.price_stars} Stars")
     if product.price_usd_cents > 0:
-        usd = (Decimal(product.price_usd_cents) / 100).quantize(Decimal("0.01"))
         for provider in ("cryptopay", "oxapay"):
             if provider in providers:
-                parts.append(f"💵 ${usd}")
+                parts.append(f"💵 {usd(product.price_usd_cents)}")
                 break
-    return " / ".join(parts) if parts else "price not configured"
+    return " · ".join(parts) if parts else "price not configured"
 
 
-def product_card(product: Product, providers: list[str], stock: int) -> str:
-    stock_line = f"📦 In stock: {stock}" if stock > 0 else "📦 Out of stock"
-    description = f"\n\n{product.description}" if product.description else ""
-    return (
-        f"<b>{product.title}</b>{description}\n\n"
-        f"💰 {price_line(product, providers)}\n"
-        f"{stock_line}"
+def product_card(
+    product: Product,
+    providers: list[str],
+    stock: int,
+    *,
+    category_name: str | None = None,
+) -> str:
+    """The full product page: description, features, guarantee and live stock."""
+    lines = [f"<b>{escape(product.title)}</b>"]
+
+    if category_name:
+        lines.append(f"<i>{escape(category_name)}</i>")
+
+    if product.description:
+        lines.extend(["", escape(product.description)])
+
+    features = product.feature_list()
+    if features:
+        lines.append("")
+        lines.append("<b>Features</b>")
+        lines.extend(f"• {escape(feature)}" for feature in features)
+
+    if product.guarantee:
+        lines.extend(["", "<b>Guarantee</b>", escape(product.guarantee)])
+
+    lines.extend(
+        [
+            "",
+            f"💰 <b>{price_line(product, providers)}</b>",
+            stock_badge(stock),
+        ]
     )
+    return "\n".join(lines)
 
 
 def order_card(order: Order, *, product_title: str | None = None) -> str:
@@ -54,20 +97,21 @@ def order_card(order: Order, *, product_title: str | None = None) -> str:
         f"Amount: {format_amount(order.amount_minor, order.currency)} {order.currency}",
         f"Method: {PROVIDER_LABELS.get(order.provider, order.provider)}",
     ]
+    if order.quantity > 1:
+        lines.insert(2, f"Quantity: {order.quantity}")
     if product_title:
-        lines.insert(1, f"Item: {product_title}")
+        lines.insert(1, f"Item: {escape(product_title)}")
     return "\n".join(lines)
 
 
 def delivery_message(order: Order, *, product_title: str) -> str:
+    items = order.delivered_list()
+    listing = "\n".join(f"<code>{escape(item)}</code>" for item in items)
     return (
         f"🎉 <b>Payment received — here is your order</b>\n\n"
-        f"<b>{product_title}</b>\n"
-        f"<code>{_escape(order.delivery_payload or '')}</code>\n\n"
+        f"<b>{escape(product_title)}</b>\n"
+        f"{listing}\n\n"
         f"Order #{order.id[:8]}\n"
         f"Thank you for your purchase!"
     )
 
-
-def _escape(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

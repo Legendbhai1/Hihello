@@ -81,6 +81,21 @@ class User(Base, TimestampMixin):
     orders: Mapped[list[Order]] = relationship(back_populates="user")
 
 
+class Category(Base, TimestampMixin):
+    """A store section. Products with no category show under "Uncategorised"."""
+
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    emoji: Mapped[str] = mapped_column(String(8), default="", nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    products: Mapped[list[Product]] = relationship(back_populates="category")
+
+
 class Product(Base, TimestampMixin):
     __tablename__ = "products"
 
@@ -88,13 +103,27 @@ class Product(Base, TimestampMixin):
     sku: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     title: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Bullet points, one per line, shown on the product card.
+    features: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Free-text guarantee shown on the product card.
+    guarantee: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Price in Telegram Stars (integer, XTR has no decimals).
     price_stars: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Price in US cents; used for Crypto Pay and OxaPay settlement.
     price_usd_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Most a buyer may order in one checkout.
+    max_per_order: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     stock_items: Mapped[list[StockItem]] = relationship(back_populates="product")
+    category: Mapped[Category | None] = relationship(back_populates="products")
+
+    def feature_list(self) -> list[str]:
+        return [line.strip() for line in (self.features or "").splitlines() if line.strip()]
 
 
 class StockItem(Base, TimestampMixin):
@@ -131,6 +160,9 @@ class Order(Base, TimestampMixin):
     provider: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     currency: Mapped[str] = mapped_column(String(16), nullable=False)
     currency_exponent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Unit price and total, both in minor units. total = unit * quantity.
+    unit_amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # Exact decimal string handed to the provider, kept verbatim for reconciliation.
     amount_str: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -144,6 +176,9 @@ class Order(Base, TimestampMixin):
     telegram_payment_charge_id: Mapped[str | None] = mapped_column(String(128))
     provider_payment_charge_id: Mapped[str | None] = mapped_column(String(128))
     delivery_payload: Mapped[str | None] = mapped_column(Text)
+    # All delivered units, one per line. Kept separately from delivery_payload so
+    # a partial multi-unit delivery can still be retried and re-sent whole.
+    delivered_items: Mapped[str | None] = mapped_column(Text)
     stock_item_id: Mapped[int | None] = mapped_column(BigInteger)
     delivery_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -155,6 +190,16 @@ class Order(Base, TimestampMixin):
 
     def amount_decimal(self) -> Decimal:
         return Decimal(self.amount_minor).scaleb(-self.currency_exponent)
+
+    def unit_amount_decimal(self) -> Decimal:
+        return Decimal(self.unit_amount_minor or self.amount_minor).scaleb(
+            -self.currency_exponent
+        )
+
+    def delivered_list(self) -> list[str]:
+        if self.delivered_items:
+            return [line for line in self.delivered_items.splitlines() if line]
+        return [self.delivery_payload] if self.delivery_payload else []
 
     def is_open(self) -> bool:
         return self.status in {OrderStatus.CREATED.value, OrderStatus.PENDING.value}

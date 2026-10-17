@@ -29,6 +29,7 @@ from app.db.session import create_engine, create_session_factory, init_models
 from app.logging_config import configure_logging
 from app.providers.registry import ProviderRegistry, build_registry
 from app.services.notifier import PaymentNotifier
+from app.services.stock_watcher import WatcherRegistry
 from app.web.reconciler import Reconciler
 from app.web.server import WebhookServer
 
@@ -36,6 +37,7 @@ log = logging.getLogger(__name__)
 
 BOT_COMMANDS = [
     BotCommand(command="start", description="Open the shop"),
+    BotCommand(command="shop", description="Browse products"),
     BotCommand(command="menu", description="Main menu"),
     BotCommand(command="orders", description="My orders"),
 ]
@@ -52,8 +54,10 @@ class AppContext:
     notifier: PaymentNotifier
     web_app: web.Application
     reconciler: Reconciler
+    stock_watchers: WatcherRegistry
 
     async def aclose(self) -> None:
+        await self.stock_watchers.stop_all()
         await self.reconciler.stop()
         await self.bot.session.close()
         await self.engine.dispose()
@@ -68,8 +72,12 @@ async def build_application(settings: Settings) -> AppContext:
 
     bot = create_bot(settings)
     registry = build_registry(settings, bot)
+    stock_watchers = WatcherRegistry()
     dispatcher = create_dispatcher(
-        settings=settings, session_factory=session_factory, registry=registry
+        settings=settings,
+        session_factory=session_factory,
+        registry=registry,
+        stock_watchers=stock_watchers,
     )
     notifier = PaymentNotifier(
         bot=bot, session_factory=session_factory, admin_ids=settings.admin_ids
@@ -99,6 +107,7 @@ async def build_application(settings: Settings) -> AppContext:
         notifier=notifier,
         web_app=server.build_app(),
         reconciler=reconciler,
+        stock_watchers=stock_watchers,
     )
 
 

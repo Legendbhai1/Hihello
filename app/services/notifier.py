@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot import texts
 from app.db.models import Order, Product
+from app.services import delivery
 
 log = logging.getLogger(__name__)
 
@@ -32,24 +33,42 @@ class PaymentNotifier:
     async def __call__(self, order: Order, outcome: str) -> None:
         async with self._session_factory() as session:
             product = await session.get(Product, order.product_id)
-            title = product.title if product else f"order #{order.id[:8]}"
 
-        if outcome == "delivered":
+        if product is None:
             await self._safe_send(
                 order.user_id,
-                texts.delivery_message(order, product_title=title),
+                f"✅ Order #{order.id[:8]} is paid. Please contact support to receive it.",
             )
+            return
+
+        if outcome == "delivered":
+            await self._send_file(order, product)
             return
 
         if outcome == "no_stock":
             await self._safe_send(
                 order.user_id,
-                "✅ Payment received. We are preparing your item and will send it here shortly.\n"
-                f"Order #{order.id[:8]}",
+                "✅ Payment received. We are restocking this item and will send it here "
+                f"shortly.\nOrder #{order.id[:8]}",
             )
             await self._alert_admins(
-                f"⚠️ Order #{order.id[:8]} is paid but has no stock for '{title}'.\n"
-                f"Add stock and run /retry {order.id}"
+                f"⚠️ Order #{order.id[:8]} is paid but has no stock for "
+                f"'{product.title}' ({order.quantity} needed).\n"
+                f"Add stock in /panel, then use /retry {order.id}"
+            )
+
+    async def _send_file(self, order: Order, product: Product) -> None:
+        try:
+            await self._bot.send_document(
+                order.user_id,
+                delivery.build_delivery_file(order, product),
+                caption=delivery.delivery_caption(order, product),
+            )
+        except Exception:
+            log.exception("could not send delivery file for order %s", order.id)
+            await self._safe_send(
+                order.user_id,
+                texts.delivery_message(order, product_title=product.title),
             )
 
     async def _safe_send(self, chat_id: int, text: str) -> None:

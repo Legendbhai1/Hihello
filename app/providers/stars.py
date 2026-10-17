@@ -35,14 +35,16 @@ class StarsProvider:
         if order.amount_minor <= 0:
             raise ProviderError(self.name, "Stars price must be a positive integer")
 
+        quantity = max(1, order.quantity)
+        label = product.title if quantity == 1 else f"{product.title} x{quantity}"
         try:
             message = await self._bot.send_invoice(
                 chat_id=order.user_id,
-                title=product.title[:32],
+                title=label[:32],
                 description=(product.description or product.title)[:255],
                 payload=order.id,
                 currency=STARS_CURRENCY,
-                prices=[LabeledPrice(label=product.title[:32], amount=order.amount_minor)],
+                prices=[LabeledPrice(label=label[:32], amount=order.amount_minor)],
             )
         except Exception as exc:  # aiogram raises TelegramAPIError subclasses
             raise ProviderError(self.name, f"sendInvoice failed: {exc}") from exc

@@ -10,7 +10,7 @@ digital goods for Telegram Stars, Crypto Pay (@CryptoBot) and OxaPay.
 ## Commands
 
 ```bash
-python -m pytest tests/ -q          # full suite, ~3s, 79 tests
+python -m pytest tests/ -q          # full suite, ~4s, 98 tests
 python -m ruff check app tests      # lint; must be clean
 python -m app.main                  # run the bot (needs a real BOT_TOKEN)
 ```
@@ -39,6 +39,19 @@ There is no separate build step. `pip install -e ".[dev]"` for dev deps.
   Never read-then-write order status.
 - Money is integer minor units plus a currency exponent. Never use floats.
   `_amount_ok` rejects a provider that reports a different currency.
+- Products are soft-deleted in practice: `orders.product_id` is `RESTRICT`, so
+  `catalog.delete_product` raises `ProductHasOrders` once an order exists. The
+  admin panel catches it and tells the operator to hide the product instead.
+- Do not rely on ORM relationship cascades for deletes; lazy-loading a
+  collection on an `AsyncSession` raises `MissingGreenlet`. Delete children with
+  an explicit `delete()` statement (`catalog.delete_product`).
+- The dev database (`data/shop.db`) is not migrated automatically: there is no
+  Alembic setup. After changing a model, delete the file and let
+  `init_models` recreate it, then reseed.
+- Telegram allows **one** `getUpdates` consumer per token. Long-polling shows
+  `TelegramConflictError` for up to ~60s after a previous instance is killed;
+  it clears on its own. A permanent conflict means a second instance is really
+  running.
 
 ## Provider gotchas (verified against provider docs)
 

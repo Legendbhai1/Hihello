@@ -81,7 +81,7 @@ async def _seed_order(
             user_id=USER_ID,
             product=product,
             provider=provider,
-            amount_minor=amount_minor,
+            unit_amount_minor=amount_minor,
             currency=currency,
             expiry_minutes=30,
         )

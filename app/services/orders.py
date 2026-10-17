@@ -72,20 +72,26 @@ async def create_order(
     user_id: int,
     product: Product,
     provider: str,
-    amount_minor: int,
+    unit_amount_minor: int,
     currency: str,
+    quantity: int = 1,
     expiry_minutes: int,
 ) -> Order:
-    if amount_minor <= 0:
+    if unit_amount_minor <= 0:
         raise FulfillmentError("order amount must be positive")
+    if quantity < 1:
+        raise FulfillmentError("quantity must be at least 1")
+    total = unit_amount_minor * quantity
     order = Order(
         user_id=user_id,
         product_id=product.id,
         provider=provider,
         currency=currency.upper(),
         currency_exponent=exponent_for(currency),
-        amount_minor=amount_minor,
-        amount_str=format_amount(amount_minor, currency),
+        quantity=quantity,
+        unit_amount_minor=unit_amount_minor,
+        amount_minor=total,
+        amount_str=format_amount(total, currency),
         status=OrderStatus.CREATED.value,
         expires_at=utcnow() + timedelta(minutes=expiry_minutes),
     )
@@ -196,34 +202,45 @@ async def apply_payment_update(session: AsyncSession, update: PaymentUpdate) -> 
 
 
 async def deliver_order(session: AsyncSession, order: Order) -> None:
-    """Attach a stock item to a paid order. Raises :class:`StockUnavailable`."""
+    """Attach stock items to a paid order. Raises :class:`StockUnavailable`.
+
+    All-or-nothing: if the order needs more units than are available, nothing is
+    reserved and the order stays ``paid`` so an operator can restock and retry.
+    """
     if order.status == OrderStatus.DELIVERED.value:
         return
 
-    stock_item = await _reserve_stock(session, order)
-    if stock_item is None:
-        log.error("order %s paid but no stock for product %s", order.id, order.product_id)
+    wanted = max(1, order.quantity)
+    items = await _reserve_stock(session, order, wanted)
+    if items is None:
+        log.error("order %s paid but needs %s unit(s) with no stock for product %s",
+                  order.id, wanted, order.product_id)
         raise StockUnavailable(f"no stock for product {order.product_id}")
 
-    delivered = await session.execute(
-        update(StockItem)
-        .where(
-            StockItem.id == stock_item.id,
-            StockItem.order_id == order.id,
-            StockItem.delivered_at.is_(None),
+    delivered_ids: list[int] = []
+    for item in items:
+        result = await session.execute(
+            update(StockItem)
+            .where(
+                StockItem.id == item.id,
+                StockItem.order_id == order.id,
+                StockItem.delivered_at.is_(None),
+            )
+            .values(delivered_at=utcnow())
         )
-        .values(delivered_at=utcnow())
-    )
-    if delivered.rowcount == 0:
-        raise StockUnavailable("stock item was claimed by another delivery")
+        if result.rowcount != 1:
+            raise StockUnavailable("stock item was claimed by another delivery")
+        delivered_ids.append(item.id)
 
-    order.delivery_payload = stock_item.payload
-    order.stock_item_id = stock_item.id
+    payloads = [item.payload for item in items]
+    order.delivery_payload = "\n".join(payloads)
+    order.delivered_items = "\n".join(payloads)
+    order.stock_item_id = delivered_ids[0]
     order.status = OrderStatus.DELIVERED.value
     order.delivered_at = utcnow()
     order.delivery_attempts += 1
     await session.flush()
-    log.info("order %s delivered product=%s", order.id, order.product_id)
+    log.info("order %s delivered %s unit(s) of product %s", order.id, len(payloads), order.product_id)
 
 
 async def retry_delivery(session: AsyncSession, order: Order) -> bool:
@@ -239,31 +256,50 @@ async def retry_delivery(session: AsyncSession, order: Order) -> bool:
     return True
 
 
-async def _reserve_stock(session: AsyncSession, order: Order) -> StockItem | None:
-    """Claim one unreserved stock row for the order, retrying on races."""
+async def _reserve_stock(session: AsyncSession, order: Order, wanted: int) -> list[StockItem] | None:
+    """Claim ``wanted`` unreserved units for the order, all or nothing.
+
+    The claim is one atomic UPDATE over a limited subquery, so two concurrent
+    deliveries cannot take the same unit. If fewer than ``wanted`` units could be
+    claimed, the partial claim is released and ``None`` is returned.
+    """
     for _ in range(5):
-        candidate = (
-            await session.execute(
-                select(StockItem)
-                .where(
-                    StockItem.product_id == order.product_id,
-                    StockItem.order_id.is_(None),
-                    StockItem.delivered_at.is_(None),
-                )
-                .order_by(StockItem.id)
-                .limit(1)
+        candidate_ids = (
+            select(StockItem.id)
+            .where(
+                StockItem.product_id == order.product_id,
+                StockItem.order_id.is_(None),
+                StockItem.delivered_at.is_(None),
             )
-        ).scalar_one_or_none()
-        if candidate is None:
-            return None
+            .order_by(StockItem.id)
+            .limit(wanted)
+            .scalar_subquery()
+        )
         claimed = await session.execute(
             update(StockItem)
-            .where(StockItem.id == candidate.id, StockItem.order_id.is_(None))
+            .where(StockItem.id.in_(candidate_ids))
             .values(order_id=order.id, reserved_at=utcnow())
         )
-        if claimed.rowcount == 1:
-            await session.refresh(candidate)
-            return candidate
+        if claimed.rowcount == wanted:
+            items = list(
+                (
+                    await session.execute(
+                        select(StockItem)
+                        .where(StockItem.order_id == order.id, StockItem.delivered_at.is_(None))
+                        .order_by(StockItem.id)
+                    )
+                ).scalars()
+            )
+            return items
+        # A concurrent delivery took some units; give ours back and retry.
+        await session.execute(
+            update(StockItem)
+            .where(StockItem.order_id == order.id, StockItem.delivered_at.is_(None))
+            .values(order_id=None, reserved_at=None)
+        )
+        await session.flush()
+        if (claimed.rowcount or 0) == 0:
+            return None
     return None
 
 

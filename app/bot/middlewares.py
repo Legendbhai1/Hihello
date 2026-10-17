@@ -31,6 +31,9 @@ class DbSessionMiddleware(BaseMiddleware):
     ) -> Any:
         async with self._session_factory() as session:
             data["session"] = session
+            # Handlers that start background work (the stock watcher) need a way
+            # to open their own sessions once this one is committed and closed.
+            session.info["session_factory"] = self._session_factory
             from_user: TgUser | None = getattr(event, "from_user", None)
             if from_user is not None and not from_user.is_bot:
                 data["db_user"] = await get_or_create_user(
