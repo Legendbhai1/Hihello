@@ -45,6 +45,12 @@ Hosted on Render; see `DEPLOY.md`. `render.yaml` is the blueprint.
   server binds `bind_port`.
 - Webhook mode needs `PUBLIC_BASE_URL` set to the live `https://` service URL
   plus a non-empty `WEBHOOK_SECRET`.
+- **Environment variables beat `.env`.** pydantic-settings reads real env vars
+  first, so an exported `ADMIN_IDS=0` silently overrides the file. This bit us:
+  the bot ran with `admin_ids=[0]` and `/panel` refused the owner. When a value
+  looks wrong but the `.env` line looks right, run `env | grep <NAME>` before
+  anything else. On Render, set variables in the dashboard — `.env` is not
+  deployed.
 
 
 ## Testing conventions
