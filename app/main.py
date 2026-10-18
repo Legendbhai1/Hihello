@@ -115,12 +115,22 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
 
+    if settings.platform_port and settings.uses_ephemeral_disk:
+        # A platform-injected PORT means we are on a host whose filesystem is
+        # replaced on every deploy. Warn loudly: orders and stock will vanish.
+        log.warning(
+            "DATABASE_URL points at SQLite (%s) on a platform with an ephemeral "
+            "filesystem; all orders and stock will be lost on redeploy. "
+            "Set DATABASE_URL to a managed Postgres instance.",
+            settings.database_url,
+        )
+
     ctx = await build_application(settings)
     runner = web.AppRunner(ctx.web_app)
     await runner.setup()
-    site = web.TCPSite(runner, settings.http_host, settings.http_port)
+    site = web.TCPSite(runner, settings.http_host, settings.bind_port)
     await site.start()
-    log.info("callback server listening on %s:%s", settings.http_host, settings.http_port)
+    log.info("callback server listening on %s:%s", settings.http_host, settings.bind_port)
 
     stop_event = asyncio.Event()
 

@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     webhook_secret: str = Field("", alias="WEBHOOK_SECRET")
     http_host: str = Field("0.0.0.0", alias="HTTP_HOST")
     http_port: int = Field(8080, alias="HTTP_PORT")
+    # Injected by hosting platforms (Render, Heroku, Fly). Takes precedence over
+    # HTTP_PORT so the health check and provider webhooks stay reachable.
+    platform_port: int | None = Field(None, alias="PORT")
 
     # Storage
     database_url: str = Field("sqlite+aiosqlite:///./data/shop.db", alias="DATABASE_URL")
@@ -62,6 +65,43 @@ class Settings(BaseSettings):
         if isinstance(value, int):
             return [value]
         return value
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _normalize_database_url(cls, value: str) -> str:
+        """Make a hosted Postgres URL usable by SQLAlchemy's async engine.
+
+        Render/Heroku hand out ``postgres://`` and ``postgresql://`` URLs. Both
+        select psycopg2, which is synchronous, so an async engine would fail at
+        connect time. Point them at asyncpg instead.
+        """
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+asyncpg://" + value[len(prefix) :]
+        return value
+
+    @property
+    def bind_port(self) -> int:
+        """The port the callback server should listen on.
+
+        Hosting platforms inject ``$PORT`` and route traffic only to it, so it
+        wins over the local default.
+        """
+        return self.platform_port or self.http_port
+
+    @property
+    def is_postgres(self) -> bool:
+        return self.database_url.startswith("postgresql")
+
+    @property
+    def uses_ephemeral_disk(self) -> bool:
+        """True when the database lives on the container's own filesystem.
+
+        Hosts like Render discard that filesystem on every deploy and restart,
+        which would silently wipe orders and stock. SQLite is only safe here
+        for local development.
+        """
+        return self.database_url.startswith("sqlite")
 
     @property
     def telegram_webhook_url(self) -> str:

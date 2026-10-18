@@ -10,12 +10,42 @@ digital goods for Telegram Stars, Crypto Pay (@CryptoBot) and OxaPay.
 ## Commands
 
 ```bash
-python -m pytest tests/ -q          # full suite, ~4s, 98 tests
+python -m pytest tests/ -q          # full suite, ~4s, 106 tests
 python -m ruff check app tests      # lint; must be clean
 python -m app.main                  # run the bot (needs a real BOT_TOKEN)
 ```
 
 There is no separate build step. `pip install -e ".[dev]"` for dev deps.
+`pip install -e ".[postgres]"` adds asyncpg, needed when `DATABASE_URL` is a
+Postgres URL.
+
+## Standing workflow rules (owner instruction)
+
+These override the usual caution. The owner asked for them explicitly:
+
+- **Commit and push every change as it is made.** Do not wait for a follow-up
+  command, and do not ask before pushing. Finish a change, then push it in the
+  same turn.
+- **Push to `main` only.** No other branch, no pull requests.
+- Remote is `origin` -> `https://github.com/Legendbhai1/Hihello.git`.
+- If a push fails with a password prompt, the token in the remote URL has been
+  rotated: re-run
+  `git remote set-url origin https://${GITHUB_TOKEN}@github.com/Legendbhai1/Hihello.git`
+  and push again.
+
+## Deployment
+
+Hosted on Render; see `DEPLOY.md`. `render.yaml` is the blueprint.
+
+- **Never use SQLite on Render.** The container filesystem is discarded on every
+  deploy, taking orders and stock with it. Use the managed Postgres instance.
+- Render gives a `postgres://` URL, which implies the sync psycopg2 driver.
+  `Settings._normalize_database_url` rewrites it to `postgresql+asyncpg://`.
+- Render injects `PORT`; `Settings.bind_port` prefers it over `HTTP_PORT`. The
+  server binds `bind_port`.
+- Webhook mode needs `PUBLIC_BASE_URL` set to the live `https://` service URL
+  plus a non-empty `WEBHOOK_SECRET`.
+
 
 ## Testing conventions
 

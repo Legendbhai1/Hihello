@@ -1,0 +1,54 @@
+# Render blueprint for cryptoshop-bot.
+#
+# Creates the web service and a managed Postgres database, and wires the
+# database URL into the service automatically.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+#
+# Secrets are declared with `sync: false`, so Render prompts for them instead of
+# storing them in git. Set them once in the dashboard.
+
+databases:
+  - name: cryptoshop-db
+    databaseName: cryptoshop
+    user: cryptoshop
+    plan: free
+
+services:
+  - type: web
+    name: cryptoshop-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -e ".[postgres]"
+    # Polling and webhook modes both run one long-lived process; the callback
+    # server binds $PORT, which Render routes public traffic to.
+    startCommand: python -m app.main
+    healthCheckPath: /health
+    envVars:
+      # Render injects PORT; config.py reads it as platform_port.
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        value: "8709027532"
+      - key: BOT_MODE
+        value: webhook
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cryptoshop-db
+          property: connectionString
+      - key: STARS_ENABLED
+        value: "true"
+      - key: CRYPTOPAY_ENABLED
+        value: "false"
+      - key: CRYPTOPAY_TOKEN
+        sync: false
+      - key: OXAPAY_ENABLED
+        value: "false"
+      - key: OXAPAY_API_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
